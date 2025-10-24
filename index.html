@@ -63,7 +63,11 @@ for (let y = 0; y < gridSize; y++) {
     cell.dataset.x = x;
     cell.dataset.y = y;
     gridDiv.appendChild(cell);
-    cell.addEventListener('mouseenter', () => highlightArea(x, y));
+    cell.addEventListener('mouseenter', () => {
+  lastHoverX = x;
+  lastHoverY = y;
+  highlightArea(x, y);
+});
     cell.addEventListener('mouseleave', clearHighlights);
     cell.addEventListener('click', () => placeCard(x, y));
   }
@@ -355,6 +359,11 @@ function rotateCard(index) {
   const b = card.blocks;
   card.blocks = [b[2], b[0], b[3], b[1]]; // поворот на 90° по часовой
   renderHand();
+
+  // обновляем превью на сетке, если карта выбрана и курсор над сеткой
+  if (selectedCardIndex !== null && lastHoverX !== undefined && lastHoverY !== undefined) {
+    highlightArea(lastHoverX, lastHoverY);
+  }
 }
 
 </script>
