@@ -35,26 +35,61 @@ body { font-family: sans-serif; text-align: center; }
 .nature-text { color: #09c; font-weight: bold; }
 .culture-text { color: #c90; font-weight: bold; }
 #message { margin-top: 10px; font-size: 16px; min-height: 30px; }
+
+/* === styles for quest cards (added) === */
+#left-panel {
+  width: 260px;
+  display: inline-block;
+  vertical-align: top;
+  text-align: left;
+  margin-right: 20px;
+}
+#quests {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.quest-card {
+  border: 2px solid #555;
+  border-radius: 10px;
+  padding: 10px;
+  background: #f4f4f4;
+  box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+}
+.quest-title { font-weight: bold; margin-bottom: 5px; }
+.quest-reward { font-size: 12px; color: #090; }
+.quest-desc { font-size: 13px; margin-bottom: 8px; }
+.progress-container { width: 100%; height: 16px; background: #ddd; border-radius: 6px; overflow: hidden; position: relative; }
+.progress-bar { height: 100%; background: linear-gradient(90deg, #3c8, #4c4); width: 0%; transition: width 0.3s ease; }
+.completed { border-color: gold; background: #fffbe0; }
+
 </style>
 </head>
 <body>
 
 <h1>Прототип карточного города</h1>
-<div id="score">Очки: 0</div>
-<div id="info"></div>
-<div id="quests"></div>
-<div id="grid"></div>
-<h3>Рука</h3>
-<div id="hand"></div>
-<div id="message">
-  <div id="msg-score"></div>
-  <div id="msg-event"></div>
+<div id="left-panel">
+  <h3>Квесты</h3>
+  <div id="quests"></div>
+</div>
+<div style="display:inline-block; vertical-align: top;">
+  <div id="score">Очки: 0</div>
+  <div id="info"></div>
+  <div id="grid"></div>
+  <h3>Рука</h3>
+  <div id="hand"></div>
+  <div id="message">
+    <div id="msg-score"></div>
+    <div id="msg-event"></div>
+  </div>
 </div>
 
 <script>
 const gridSize = 10;
 let grid = Array.from({length: gridSize}, () => Array.from({length: gridSize}, () => null));
 const gridDiv = document.getElementById('grid');
+
+let lastHoverX, lastHoverY; // хранит последнюю ячейку, на которой был курсор
 
 for (let y = 0; y < gridSize; y++) {
   for (let x = 0; x < gridSize; x++) {
@@ -64,18 +99,20 @@ for (let y = 0; y < gridSize; y++) {
     cell.dataset.y = y;
     gridDiv.appendChild(cell);
     cell.addEventListener('mouseenter', () => {
-  lastHoverX = x;
-  lastHoverY = y;
-  highlightArea(x, y);
-});
-    cell.addEventListener('mouseleave', clearHighlights);
+      lastHoverX = x; lastHoverY = y;
+      highlightArea(x, y);
+    });
+    cell.addEventListener('mouseleave', () => {
+      clearHighlights();
+      // оставляем lastHoverX/Y, чтобы можно было обновить превью при повороте
+    });
     cell.addEventListener('click', () => placeCard(x, y));
   }
 }
 
 let selectedCardIndex = null;
-let cardRotation = 0;
-let cardRotations = []; // индивидуальные повороты карт в руке
+let cardRotation = 0; // глобальная ориентация текущей выбранной карты (0..3)
+let cardRotations = []; // индивидуальные повороты карт в руке (не обязателен, но оставлен)
 let deck = [];
 let hand = [];
 let activeQuests = [];
@@ -96,6 +133,52 @@ const allQuests = [
   { name: "Заводы вместе", description: "Каждый промышленный блок рядом с другим промышленным +1 очко", type: "positive", goal: 6, progress: 0, reward: 1, completed: false },
   { name: "Индустриальный штраф", description: "Если промышленных блоков больше 6, каждый лишний -1 очко", type: "negative", goal: 8, progress: 0, reward: 0, completed: false },
   { name: "Индустриальный край", description: "Каждый промышленный блок на краю -1 очко", type: "negative", goal: 6, progress: 0, reward: 0, completed: false }
+];
+
+// визуальные квесты (отдельно, для карточек)
+const quests = [
+  {
+    name: "Город в зелени",
+    reward: 4,
+    goal: 10,
+    progress: 0,
+    desc: "За каждый дом, соседствующий с парком, +2 очка. За дом без парка рядом — −1 очко."
+  },
+  {
+    name: "Баланс индустрии",
+    reward: 4,
+    goal: 12,
+    progress: 0,
+    desc: "Заводы приносят по +2 очка, если рядом хотя бы один дом и один парк. Если рядом только дома — −2 очка."
+  },
+  {
+    name: "Комфортные окраины",
+    reward: 4,
+    goal: 10,
+    progress: 0,
+    desc: "Дома на краю поля дают +2 очка, но только если не касаются заводов."
+  },
+  {
+    name: "Сердце культуры",
+    reward: 6,
+    goal: 15,
+    progress: 2,
+    desc: "Получай +3 очка за каждый культурный блок, соседствующий со всеми 4-мя видами кварталов."
+  },
+  {
+    name: "Пояс жизни",
+    reward: 4,
+    goal: 12,
+    progress: 8,
+    desc: "Получай +4 очка за каждую цепочку из 4 клеток, где чередуются природные и жилые блоки."
+  },
+  {
+    name: "Душа города",
+    reward: 6,
+    goal: 15,
+    progress: 5,
+    desc: "Получай +5 очков за каждую цепочку из 5 культурных блоков, соединённых по соседству или диагонали."
+  }
 ];
 
 // генерация случайной карты
@@ -123,6 +206,53 @@ function initActiveQuests() {
 }
 initActiveQuests();
 
+// === Отображение квестов ===
+function renderQuests() {
+  const qDiv = document.getElementById('quests');
+  qDiv.innerHTML = '';
+  activeQuests.forEach(q => {
+    const card = document.createElement('div');
+    card.className = 'quest-card';
+    if (q.completed) card.classList.add('completed');
+
+    const title = document.createElement('div');
+    title.className = 'quest-title';
+    title.textContent = q.name;
+
+    const reward = document.createElement('div');
+    reward.className = 'quest-reward';
+    reward.textContent = `Награда: +${q.reward} карт`;
+
+    const desc = document.createElement('div');
+    desc.className = 'quest-desc';
+    desc.textContent = q.description || q.desc || '';
+
+    const progressCont = document.createElement('div');
+    progressCont.className = 'progress-container';
+
+    const progress = document.createElement('div');
+    progress.className = 'progress-bar';
+    progress.style.width = `${Math.min(100, (q.progress / q.goal) * 100)}%`;
+    progressCont.appendChild(progress);
+
+    const progressText = document.createElement('div');
+    progressText.textContent = `${Math.min(q.progress, q.goal)}/${q.goal}`;
+    progressText.style.position = 'absolute';
+    progressText.style.top = '50%';
+    progressText.style.left = '50%';
+    progressText.style.transform = 'translate(-50%, -50%)';
+    progressText.style.fontSize = '12px';
+    progressText.style.fontWeight = 'bold';
+    progressText.style.color = '#000';
+    progressText.style.pointerEvents = 'none';
+    progressCont.appendChild(progressText);
+
+    card.append(title, desc, reward, progressCont);
+    qDiv.appendChild(card);
+  });
+}
+
+renderQuests();
 drawHand();
 computeScore();
 
@@ -175,26 +305,22 @@ function highlightArea(x, y) {
   const card = hand[selectedCardIndex];
   const blocks = card.blocks;
 
-  let idx = 0;
-  for (let dy = 0; dy < 2; dy++) {
-    for (let dx = 0; dx < 2; dx++) {
-      const nx = x + dx;
-      const ny = y + dy;
-      if (nx < gridSize && ny < gridSize) {
-        const cell = gridDiv.children[ny * gridSize + nx];
-        cell.classList.add('highlight');
+  // используем getRotatedCoords чтобы учесть cardRotation
+  const coords = [[x,y],[x+1,y],[x,y+1],[x+1,y+1]];
+  coords.forEach(([nx, ny], idx) => {
+    if (nx < gridSize && ny < gridSize) {
+      const cell = gridDiv.children[ny * gridSize + nx];
+      cell.classList.add('highlight');
 
-        // Добавляем полноценный превью-блок (непрозрачный)
-        const preview = document.createElement('div');
-        preview.className = 'block-layer ' + blocks[idx] + ' preview';
-        preview.textContent = blocks[idx][0].toUpperCase();
-        preview.style.opacity = '1';
-        preview.style.pointerEvents = 'none';
-        cell.appendChild(preview);
-      }
-      idx++;
+      // Добавляем полноценный превью-блок (непрозрачный)
+      const preview = document.createElement('div');
+      preview.className = 'block-layer ' + blocks[idx] + ' preview';
+      preview.textContent = blocks[idx][0].toUpperCase();
+      preview.style.opacity = '1';
+      preview.style.pointerEvents = 'none';
+      cell.appendChild(preview);
     }
-  }
+  });
 }
 
 function clearHighlights() {
@@ -206,12 +332,7 @@ function clearHighlights() {
 
 function getRotatedCoords(x, y) {
   const rel = [[0,0],[1,0],[0,1],[1,1]];
-  switch(cardRotation) {
-    case 1: return rel.map(([dx,dy]) => [x+1-dy, y+dx]); // 90°
-    case 2: return rel.map(([dx,dy]) => [x+1-dx, y+1-dy]); // 180°
-    case 3: return rel.map(([dx,dy]) => [x+dy, y+1-dx]); // 270°
-    default: return rel.map(([dx,dy]) => [x+dx, y+dy]);
-  }
+  return rel.map(([dx,dy]) => [x+dx, y+dy]); // просто ставим по текущему порядку блоков
 }
 
 function placeCard(x, y) {
@@ -259,7 +380,7 @@ function highlightQuestText(text) {
 
 function computeScore() {
   const questDiv = document.getElementById('quests');
-  questDiv.innerHTML = '';
+  // оставляем визуал квестов отдельными — не трогаем
   let currentTotal = 0;
   activeQuests.forEach(q => {
     let bonus = 0;
@@ -289,9 +410,6 @@ function computeScore() {
     }
     completedQuestPoints[q.name] = bonus;
     currentTotal += bonus;
-    const div = document.createElement('div');
-    div.innerHTML = `${q.name} (${highlightQuestText(q.description)}): ${bonus>=0?'+':''}${bonus}`;
-    questDiv.appendChild(div);
   });
   lastScore = currentTotal + completedQuests.reduce((sum,q)=>sum+q.points,0);
   document.getElementById('score').textContent = `Очки: ${lastScore}`;
@@ -347,6 +465,7 @@ function checkGameEnd() {
   if (activeQuests.length === 0 && allQuests.length === completedQuests.length) alert("Поздравляем! Вы выполнили все квесты!");
 }
 
+// В обработке клавиш — вращаем выбранную карту: обновляем блоки, увеличиваем cardRotation и обновляем превью, если есть lastHover
 document.addEventListener('keydown', e => {
   const key = e.key.toLowerCase();
   if ((key === 'r' || key === 'к') && selectedCardIndex !== null) {
@@ -357,7 +476,10 @@ document.addEventListener('keydown', e => {
 function rotateCard(index) {
   const card = hand[index];
   const b = card.blocks;
-  card.blocks = [b[2], b[0], b[3], b[1]]; // поворот на 90° по часовой
+  // поворот на 90° по часовой: меняем порядок блоков
+  card.blocks = [b[2], b[0], b[3], b[1]];
+  // запоминаем ориентацию для расчёта координат при размещении и превью
+  cardRotation = (cardRotation + 1) % 4;
   renderHand();
 
   // обновляем превью на сетке, если карта выбрана и курсор над сеткой
@@ -365,6 +487,7 @@ function rotateCard(index) {
     highlightArea(lastHoverX, lastHoverY);
   }
 }
+
 
 </script>
 
