@@ -27,7 +27,7 @@ body { font-family: sans-serif; text-align: center; }
 .nature { background: #8fc3d1; }
 .culture { background: #d1c08f; }
 #hand { margin-top: 20px; display: flex; justify-content: center; }
-.card { display: inline-block; width: 80px; height: 80px; margin: 0 5px; cursor: pointer; border: 2px solid #333; display: flex; flex-wrap: wrap; transition: transform 0.2s ease; transform-origin: center center;}
+.card { width: 80px; height: 80px; margin: 0 5px; cursor: pointer; border: 2px solid #333; display: flex; flex-wrap: wrap; transition: transform 0.2s ease; transform-origin: center center;}
 .block { width: 40px; height: 40px; box-sizing: border-box; border: 1px solid #555; display: flex; align-items: center; justify-content: center; font-size: 9px; }
 .selected { border-color: red; }
 .residential-text { color: #0b5; font-weight: bold; }
@@ -47,7 +47,7 @@ body { font-family: sans-serif; text-align: center; }
 #quests {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 15px;
 }
 .quest-card {
   position: relative; /* <-- это нужно для абсолютного бейджа */
@@ -81,6 +81,55 @@ body { font-family: sans-serif; text-align: center; }
   pointer-events: none;
 }
 
+#hand-wrapper {
+  display: flex;
+  justify-content: center;
+  align-items: center; /* центрируем колоду и рукав по высоте */
+  gap: 20px;
+}
+
+#deck-counter {
+  display: flex;
+  flex-direction: column; /* если нужен текст сверху/цифра снизу */
+  justify-content: center; /* центрируем контент внутри */
+  align-items: center;
+  flex-shrink: 0; /* не сжимать */
+  width: 80px;
+  height: 80px;
+  border: 2px dashed #555;
+  border-radius: 8px;
+  background: #fafafa;
+  color: #333;
+  font-size: 14px;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  line-height: 1;
+  transform: translateY(10px); /* подогнать визуально */
+}
+
+#deck-counter * {
+  margin: 0;
+  padding: 0;
+  line-height: 1; /* гарантируем отсутствие смещений текста */
+}
+
+#hand {
+  display: flex;
+  gap: 5px;
+  align-items: center; /* центрируем карты по вертикали */
+}
+
+
+
+
+#deck-counter span.count {
+  font-size: 24px;  /* большая цифра */
+  font-weight: bold;
+  line-height: 1;
+}
+
+
 </style>
 </head>
 <body>
@@ -95,7 +144,11 @@ body { font-family: sans-serif; text-align: center; }
   <div id="info"></div>
   <div id="grid"></div>
   <h3>Рука</h3>
+  <div id="hand-wrapper">
+  <div id="deck-counter">В колоде: 0</div>
   <div id="hand"></div>
+</div>
+
   <div id="message">
     <div id="msg-score"></div>
     <div id="msg-event"></div>
@@ -199,6 +252,11 @@ const quests = [
   }
 ];
 
+function updateDeckCounter() {
+  const counter = document.getElementById('deck-counter');
+  counter.innerHTML = `В колоде:<br><br><span class="count">${deck.length}</span>`;
+}
+
 // генерация случайной карты
 function generateRandomCard() {
   const blocks = ["residential", "industrial", "nature", "culture"];
@@ -281,11 +339,6 @@ renderQuests();
 drawHand();
 computeScore();
 
-function updateInfo() {
-  const remainingQuests = allQuests.filter(q => !activeQuests.some(aq => aq.name === q.name) && !completedQuests.some(cq => cq.name === q.name));
-  document.getElementById('info').textContent = `Карт в колоде: ${deck.length}, Квестов в колоде: ${remainingQuests.length}`;
-}
-
 function drawHand() {
   while (hand.length < 3 && deck.length > 0) {
     const idx = Math.floor(Math.random() * deck.length);
@@ -294,7 +347,7 @@ function drawHand() {
     cardRotations.push(0);
   }
   renderHand();
-  updateInfo();
+  updateDeckCounter();
 }
 
 function renderHand() {
@@ -389,7 +442,6 @@ function placeCard(x, y) {
   computeScore();
   checkCompletedQuests();
   checkThresholds();
-  updateInfo();
   checkGameEnd();
 }
 
@@ -468,7 +520,6 @@ function computeScore() {
   msgScore.textContent = diff>=0 ? `Начислено: +${diff}` : `Начислено: ${diff}`;
 
   updateQuestProgressVisuals();
-  updateInfo();
 }
 
 
@@ -482,7 +533,7 @@ function checkThresholds() {
     eventMsg += "Добавлена новая карта! ";
     nextCardThreshold += 3;
     renderHand();
-    updateInfo();
+    updateDeckCounter();
   }
 
   msgEvent.textContent = eventMsg;
@@ -508,7 +559,6 @@ function replaceRandomQuest() {
 
   if (newQuest) activeQuests.push(newQuest);
   computeScore();
-  updateInfo();
   return !!newQuest;
 }
 
@@ -552,19 +602,34 @@ function checkCompletedQuests() {
       completedQuests.push({ name: q.name, points: completedQuestPoints[q.name] });
       activeQuests.splice(i, 1);
 
-      // любой доступный квест
-      const availableQuests = allQuests.filter(aq => 
+      // проверяем, есть ли ещё квесты в колоде
+      let availableQuests = allQuests.filter(aq =>
         !completedQuests.some(cq => cq.name === aq.name) &&
         !activeQuests.some(aq2 => aq2.name === aq.name)
       );
 
+      // если колода пуста, сбрасываем все завершённые квесты
+      if (availableQuests.length === 0 && completedQuests.length > 0) {
+        completedQuests.forEach(cq => {
+          const original = allQuests.find(aq => aq.name === cq.name);
+          if (original) {
+            original.progress = 0;
+            original.completed = false;
+          }
+        });
+        completedQuests.length = 0; // очищаем массив завершённых
+        availableQuests = allQuests.filter(aq =>
+          !activeQuests.some(aq2 => aq2.name === aq.name)
+        );
+        eventMsg += "Колода квестов обновлена, завершённые квесты возвращены!\n";
+      }
+
+      // добавляем новый квест, если есть
       if (availableQuests.length > 0) {
         const idx = Math.floor(Math.random() * availableQuests.length);
         activeQuests.push(availableQuests[idx]);
         eventMsg += `Заменён квест "${q.name}" на "${availableQuests[idx].name}"! `;
-        computeScore(); // пересчитываем сразу
-      } else {
-        eventMsg += `Квест "${q.name}" выполнен, новых квестов больше нет. `;
+        computeScore(); // пересчёт очков сразу
       }
     }
   }
@@ -572,9 +637,6 @@ function checkCompletedQuests() {
   msgEvent.textContent = eventMsg;
   renderQuests();
 }
-
-
-
 
 
 </script>
