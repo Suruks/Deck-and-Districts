@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Прототип карточного города</title>
+<style>
+body { font-family: sans-serif; text-align: center; }
+#score { margin-top: 10px; font-size: 18px; }
+#info { margin-top: 10px; font-size: 16px; }
+#quests { margin-top: 10px; text-align: left; display: inline-block; }
+#grid {
+  display: grid;
+  grid-template-columns: repeat(10, 40px);
+  grid-gap: 2px;
+  justify-content: center;
+  margin-top: 20px;
+  width: max-content;
+  margin-left: auto;
+  margin-right: auto;
+}
+.preview {position: absolute;inset: 0;pointer-events: none;}
+.cell { width: 40px; height: 40px; border: 1px solid #aaa; display: flex; align-items: center; justify-content: center; font-size: 10px; position: relative; }
+.highlight { outline: 3px solid yellow; }
+.block-layer { position: absolute; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 9px; }
+.residential { background: #8fd18f; }
+.industrial { background: #d18f8f; }
+.nature { background: #8fc3d1; }
+.culture { background: #d1c08f; }
+#hand { margin-top: 20px; display: flex; justify-content: center; }
+.card { display: inline-block; width: 80px; height: 80px; margin: 0 5px; cursor: pointer; border: 2px solid #333; display: flex; flex-wrap: wrap; transition: transform 0.2s ease; transform-origin: center center;}
+.block { width: 40px; height: 40px; box-sizing: border-box; border: 1px solid #555; display: flex; align-items: center; justify-content: center; font-size: 9px; }
+.selected { border-color: red; }
+.residential-text { color: #0b5; font-weight: bold; }
+.industrial-text { color: #b33; font-weight: bold; }
+.nature-text { color: #09c; font-weight: bold; }
+.culture-text { color: #c90; font-weight: bold; }
+#message { margin-top: 10px; font-size: 16px; min-height: 30px; }
+</style>
+</head>
+<body>
+
+<h1>Прототип карточного города</h1>
+<div id="score">Очки: 0</div>
+<div id="info"></div>
+<div id="quests"></div>
+<div id="grid"></div>
+<h3>Рука</h3>
+<div id="hand"></div>
+<div id="message">
+  <div id="msg-score"></div>
+  <div id="msg-event"></div>
+</div>
+
+<script>
+const gridSize = 10;
+let grid = Array.from({length: gridSize}, () => Array.from({length: gridSize}, () => null));
+const gridDiv = document.getElementById('grid');
+
+for (let y = 0; y < gridSize; y++) {
+  for (let x = 0; x < gridSize; x++) {
+    const cell = document.createElement('div');
+    cell.className = 'cell';
+    cell.dataset.x = x;
+    cell.dataset.y = y;
+    gridDiv.appendChild(cell);
+    cell.addEventListener('mouseenter', () => highlightArea(x, y));
+    cell.addEventListener('mouseleave', clearHighlights);
+    cell.addEventListener('click', () => placeCard(x, y));
+  }
+}
+
+let selectedCardIndex = null;
+let cardRotation = 0;
+let cardRotations = []; // индивидуальные повороты карт в руке
+let deck = [];
+let hand = [];
+let activeQuests = [];
+let completedQuests = [];
+let completedQuestPoints = {};
+let lastScore = 0;
+let prevScore = 0;
+let nextCardThreshold = 3;
+let nextQuestThreshold = 10;
+const msgScore = document.getElementById('msg-score');
+const msgEvent = document.getElementById('msg-event');
+
+const initialHandSize = 16;
+const allQuests = [
+  { name: "Парковый уют", description: "Каждый жилой блок рядом с парком дает +1 очко", type: "positive", goal: 6, progress: 0, reward: 2, completed: false },
+  { name: "Комбо культурных", description: "Каждый культурный блок рядом с другим культурным блоком дает +1 очко", type: "positive", goal: 6, progress: 0, reward: 2, completed: false },
+  { name: "Жилые на краю", description: "Каждый жилой блок на краю поля +1 очко", type: "positive", goal: 6, progress: 0, reward: 1, completed: false },
+  { name: "Заводы вместе", description: "Каждый промышленный блок рядом с другим промышленным +1 очко", type: "positive", goal: 6, progress: 0, reward: 1, completed: false },
+  { name: "Индустриальный штраф", description: "Если промышленных блоков больше 6, каждый лишний -1 очко", type: "negative", goal: 8, progress: 0, reward: 0, completed: false },
+  { name: "Индустриальный край", description: "Каждый промышленный блок на краю -1 очко", type: "negative", goal: 6, progress: 0, reward: 0, completed: false }
+];
+
+// генерация случайной карты
+function generateRandomCard() {
+  const blocks = ["residential", "industrial", "nature", "culture"];
+  for (let i = blocks.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [blocks[i], blocks[j]] = [blocks[j], blocks[i]];
+  }
+  return { name: "Новая карта", blocks };
+}
+
+for (let i = 0; i < 8; i++) deck.push(generateRandomCard());
+
+function initActiveQuests() {
+  const positives = allQuests.filter(q => q.type === "positive");
+  const negatives = allQuests.filter(q => q.type === "negative");
+  activeQuests = [];
+  for (let i = 0; i < 2; i++) {
+    const idx = Math.floor(Math.random() * positives.length);
+    activeQuests.push(positives.splice(idx, 1)[0]);
+  }
+  const idx = Math.floor(Math.random() * negatives.length);
+  activeQuests.push(negatives[idx]);
+}
+initActiveQuests();
+
+drawHand();
+computeScore();
+
+function updateInfo() {
+  const remainingQuests = allQuests.filter(q => !activeQuests.some(aq => aq.name === q.name) && !completedQuests.some(cq => cq.name === q.name));
+  document.getElementById('info').textContent = `Карт в колоде: ${deck.length}, Квестов в колоде: ${remainingQuests.length}`;
+}
+
+function drawHand() {
+  while (hand.length < 3 && deck.length > 0) {
+    const idx = Math.floor(Math.random() * deck.length);
+    const newCard = deck.splice(idx, 1)[0];
+    hand.push(newCard);
+    cardRotations.push(0);
+  }
+  renderHand();
+  updateInfo();
+}
+
+function renderHand() {
+  const handDiv = document.getElementById('hand');
+  handDiv.innerHTML = '';
+  hand.forEach((card, i) => {
+    const cardDiv = document.createElement('div');
+    cardDiv.className = 'card';
+    card.blocks.forEach(b => {
+      const blockDiv = document.createElement('div');
+      blockDiv.className = 'block ' + b;
+      blockDiv.textContent = b[0].toUpperCase();
+      cardDiv.appendChild(blockDiv);
+    });
+    cardDiv.addEventListener('click', () => selectCard(i, cardDiv));
+    if (i === selectedCardIndex) cardDiv.classList.add('selected');
+    handDiv.appendChild(cardDiv);
+  });
+}
+
+
+function selectCard(i, el) {
+  selectedCardIndex = i;
+  cardRotation = 0;
+  document.querySelectorAll('.card').forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+}
+
+function highlightArea(x, y) {
+  clearHighlights();
+  if (selectedCardIndex === null) return;
+
+  const card = hand[selectedCardIndex];
+  const blocks = card.blocks;
+
+  let idx = 0;
+  for (let dy = 0; dy < 2; dy++) {
+    for (let dx = 0; dx < 2; dx++) {
+      const nx = x + dx;
+      const ny = y + dy;
+      if (nx < gridSize && ny < gridSize) {
+        const cell = gridDiv.children[ny * gridSize + nx];
+        cell.classList.add('highlight');
+
+        // Добавляем полноценный превью-блок (непрозрачный)
+        const preview = document.createElement('div');
+        preview.className = 'block-layer ' + blocks[idx] + ' preview';
+        preview.textContent = blocks[idx][0].toUpperCase();
+        preview.style.opacity = '1';
+        preview.style.pointerEvents = 'none';
+        cell.appendChild(preview);
+      }
+      idx++;
+    }
+  }
+}
+
+function clearHighlights() {
+  document.querySelectorAll('.cell').forEach(c => {
+    c.classList.remove('highlight');
+    c.querySelectorAll('.preview').forEach(p => p.remove());
+  });
+}
+
+function getRotatedCoords(x, y) {
+  const rel = [[0,0],[1,0],[0,1],[1,1]];
+  switch(cardRotation) {
+    case 1: return rel.map(([dx,dy]) => [x+1-dy, y+dx]); // 90°
+    case 2: return rel.map(([dx,dy]) => [x+1-dx, y+1-dy]); // 180°
+    case 3: return rel.map(([dx,dy]) => [x+dy, y+1-dx]); // 270°
+    default: return rel.map(([dx,dy]) => [x+dx, y+dy]);
+  }
+}
+
+function placeCard(x, y) {
+  if (selectedCardIndex === null) return alert('Выберите карту');
+  const coords = getRotatedCoords(x, y);
+  if (coords.some(([nx,ny]) => nx < 0 || ny < 0 || nx >= gridSize || ny >= gridSize)) {
+    alert('Не хватает места'); return;
+  }
+  const card = hand[selectedCardIndex];
+  let idx = 0;
+  coords.forEach(([nx,ny]) => {
+    grid[ny][nx] = card.blocks[idx];
+    updateCellVisual(nx, ny);
+    idx++;
+  });
+  hand.splice(selectedCardIndex, 1);
+  cardRotations.splice(selectedCardIndex, 1);
+  selectedCardIndex = null;
+  drawHand();
+  prevScore = lastScore;
+  computeScore();
+  checkThresholds();
+  updateInfo();
+  checkGameEnd();
+}
+
+function updateCellVisual(x, y) {
+  const cell = gridDiv.children[y * gridSize + x];
+  cell.innerHTML = '';
+  if (grid[y][x]) {
+    const div = document.createElement('div');
+    div.className = 'block-layer ' + grid[y][x];
+    div.textContent = grid[y][x][0].toUpperCase();
+    cell.appendChild(div);
+  }
+}
+
+function highlightQuestText(text) {
+  return text
+    .replace(/жилой/gi, '<span class="residential-text">$&</span>')
+    .replace(/парков/gi, '<span class="nature-text">$&</span>')
+    .replace(/культур/gi, '<span class="culture-text">$&</span>')
+    .replace(/промышленн/gi, '<span class="industrial-text">$&</span>');
+}
+
+function computeScore() {
+  const questDiv = document.getElementById('quests');
+  questDiv.innerHTML = '';
+  let currentTotal = 0;
+  activeQuests.forEach(q => {
+    let bonus = 0;
+    if (q.name === 'Индустриальный штраф') {
+      let count = 0;
+      grid.forEach(row => row.forEach(b => { if (b === 'industrial') count++; }));
+      if (count > 6) bonus = -(count - 6);
+    } else {
+      for (let y = 0; y < gridSize; y++) {
+        for (let x = 0; x < gridSize; x++) {
+          const block = grid[y][x];
+          if (!block) continue;
+          const neighbors = [[x-1,y],[x+1,y],[x,y-1],[x,y+1]];
+          if (q.name === 'Парковый уют' && block === 'residential') { 
+            if (neighbors.some(([nx,ny]) => nx>=0 && ny>=0 && nx<gridSize && ny<gridSize && grid[ny][nx]==='nature')) bonus++; 
+          }
+          if (q.name === 'Комбо культурных' && block === 'culture') { 
+            if (neighbors.some(([nx,ny]) => nx>=0 && ny>=0 && nx<gridSize && ny<gridSize && grid[ny][nx]==='culture')) bonus++; 
+          }
+          if (q.name === 'Жилые на краю' && block==='residential'&&(x===0||y===0||x===gridSize-1||y===gridSize-1)) bonus++;
+          if (q.name === 'Заводы вместе' && block==='industrial') {
+            if (neighbors.some(([nx,ny]) => nx>=0 && ny>=0 && nx<gridSize && ny<gridSize && grid[ny][nx]==='industrial')) bonus++;
+          }
+          if (q.name === 'Индустриальный край' && block==='industrial'&&(x===0||y===0||x===gridSize-1||y===gridSize-1)) bonus--;
+        }
+      }
+    }
+    completedQuestPoints[q.name] = bonus;
+    currentTotal += bonus;
+    const div = document.createElement('div');
+    div.innerHTML = `${q.name} (${highlightQuestText(q.description)}): ${bonus>=0?'+':''}${bonus}`;
+    questDiv.appendChild(div);
+  });
+  lastScore = currentTotal + completedQuests.reduce((sum,q)=>sum+q.points,0);
+  document.getElementById('score').textContent = `Очки: ${lastScore}`;
+  const diff = lastScore - prevScore;
+  msgScore.textContent = diff>=0 ? `Начислено: +${diff}` : `Начислено: ${diff}`;
+  updateInfo();
+}
+
+function checkThresholds() {
+  let eventMsg = "";
+  while (lastScore >= nextCardThreshold) {
+    const newCard = generateRandomCard();
+    deck.push(newCard);
+    if (hand.length < 3) hand.push(deck.pop());
+    eventMsg += "Добавлена новая карта! ";
+    nextCardThreshold += 3;
+    renderHand();
+    updateInfo();
+  }
+  while (lastScore >= nextQuestThreshold) {
+    if (replaceRandomQuest()) eventMsg += "Заменен квест! ";
+    nextQuestThreshold += 10;
+  }
+  msgEvent.textContent = eventMsg;
+}
+
+function replaceRandomQuest() {
+  if (activeQuests.length === 0) return false;
+  const oldQuestIndex = Math.floor(Math.random() * activeQuests.length);
+  const oldQuest = activeQuests.splice(oldQuestIndex, 1)[0];
+  completedQuests.push({ name: oldQuest.name, points: completedQuestPoints[oldQuest.name] });
+
+  const positives = allQuests.filter(q => q.type==='positive' && !completedQuests.some(cq => cq.name===q.name) && !activeQuests.some(aq => aq.name===q.name));
+  const negatives = allQuests.filter(q => q.type==='negative' && !completedQuests.some(cq => cq.name===q.name) && !activeQuests.some(aq => aq.name===q.name));
+
+  let newQuest = null;
+  if (oldQuest.type === 'positive' && positives.length > 0) {
+    const idx = Math.floor(Math.random() * positives.length);
+    newQuest = positives[idx];
+  } else if (oldQuest.type === 'negative' && negatives.length > 0) {
+    const idx = Math.floor(Math.random() * negatives.length);
+    newQuest = negatives[idx];
+  }
+
+  if (newQuest) activeQuests.push(newQuest);
+  computeScore();
+  updateInfo();
+  return !!newQuest;
+}
+
+function checkGameEnd() {
+  if (deck.length === 0 && hand.length === 0) alert("Игра окончена: карты закончились!");
+  if (activeQuests.length === 0 && allQuests.length === completedQuests.length) alert("Поздравляем! Вы выполнили все квесты!");
+}
+
+document.addEventListener('keydown', e => {
+  const key = e.key.toLowerCase();
+  if ((key === 'r' || key === 'к') && selectedCardIndex !== null) {
+    rotateCard(selectedCardIndex);
+  }
+});
+
+function rotateCard(index) {
+  const card = hand[index];
+  const b = card.blocks;
+  card.blocks = [b[2], b[0], b[3], b[1]]; // поворот на 90° по часовой
+  renderHand();
+}
+
+</script>
+
+</body>
+</html>
