@@ -50,6 +50,7 @@ body { font-family: sans-serif; text-align: center; }
   gap: 10px;
 }
 .quest-card {
+  position: relative; /* <-- это нужно для абсолютного бейджа */
   border: 2px solid #555;
   border-radius: 10px;
   padding: 10px;
@@ -62,6 +63,23 @@ body { font-family: sans-serif; text-align: center; }
 .progress-container { width: 100%; height: 16px; background: #ddd; border-radius: 6px; overflow: hidden; position: relative; }
 .progress-bar { height: 100%; background: linear-gradient(90deg, #3c8, #4c4); width: 0%; transition: width 0.3s ease; }
 .completed { border-color: gold; background: #fffbe0; }
+.quest-reward-badge {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  background: gold;
+  color: black;
+  font-weight: bold;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  box-shadow: 1px 1px 3px rgba(0,0,0,0.3);
+  pointer-events: none;
+}
 
 </style>
 </head>
@@ -209,19 +227,25 @@ initActiveQuests();
 // === Отображение квестов ===
 function renderQuests() {
   const qDiv = document.getElementById('quests');
-  qDiv.innerHTML = '';
+  qDiv.innerHTML = ''; // очищаем старые карточки
+
   activeQuests.forEach(q => {
     const card = document.createElement('div');
     card.className = 'quest-card';
     if (q.completed) card.classList.add('completed');
+
+    card.style.position = 'relative'; // для бейджа награды
 
     const title = document.createElement('div');
     title.className = 'quest-title';
     title.textContent = q.name;
 
     const reward = document.createElement('div');
-    reward.className = 'quest-reward';
-    reward.textContent = `Награда: +${q.reward} карт`;
+    reward.className = 'quest-reward-badge';
+    reward.textContent = `${q.reward}`;
+    reward.style.position = 'absolute';
+    reward.style.top = '5px';
+    reward.style.right = '5px';
 
     const desc = document.createElement('div');
     desc.className = 'quest-desc';
@@ -232,18 +256,19 @@ function renderQuests() {
 
     const progress = document.createElement('div');
     progress.className = 'progress-bar';
-    progress.style.width = `${Math.min(100, (q.progress / q.goal) * 100)}%`;
+    const perc = Math.min(100, (q.progress / q.goal) * 100);
+    progress.style.width = perc + '%';
     progressCont.appendChild(progress);
 
     const progressText = document.createElement('div');
-    progressText.textContent = `${Math.min(q.progress, q.goal)}/${q.goal}`;
+    progressText.className = 'progress-text';
+    progressText.textContent = `${q.progress}/${q.goal}`;
     progressText.style.position = 'absolute';
     progressText.style.top = '50%';
     progressText.style.left = '50%';
     progressText.style.transform = 'translate(-50%, -50%)';
     progressText.style.fontSize = '12px';
     progressText.style.fontWeight = 'bold';
-    progressText.style.color = '#000';
     progressText.style.pointerEvents = 'none';
     progressCont.appendChild(progressText);
 
@@ -337,23 +362,32 @@ function getRotatedCoords(x, y) {
 
 function placeCard(x, y) {
   if (selectedCardIndex === null) return alert('Выберите карту');
+
   const coords = getRotatedCoords(x, y);
   if (coords.some(([nx,ny]) => nx < 0 || ny < 0 || nx >= gridSize || ny >= gridSize)) {
-    alert('Не хватает места'); return;
+    alert('Не хватает места'); 
+    return;
   }
+
   const card = hand[selectedCardIndex];
   let idx = 0;
+  const newBlocks = [];
   coords.forEach(([nx,ny]) => {
     grid[ny][nx] = card.blocks[idx];
     updateCellVisual(nx, ny);
+    newBlocks.push([nx, ny]);
     idx++;
   });
+
   hand.splice(selectedCardIndex, 1);
   cardRotations.splice(selectedCardIndex, 1);
   selectedCardIndex = null;
+
   drawHand();
+
   prevScore = lastScore;
   computeScore();
+  checkCompletedQuests();
   checkThresholds();
   updateInfo();
   checkGameEnd();
@@ -378,45 +412,66 @@ function highlightQuestText(text) {
     .replace(/промышленн/gi, '<span class="industrial-text">$&</span>');
 }
 
+function updateQuestProgressVisuals() {
+  const qCards = document.querySelectorAll('.quest-card');
+  activeQuests.forEach((q, i) => {
+    const progressBar = qCards[i].querySelector('.progress-bar');
+    const progressText = qCards[i].querySelector('.progress-text');
+    if (!progressBar || !progressText) return;
+
+    const perc = Math.min(100, (q.progress / q.goal) * 100);
+    progressBar.style.width = perc + '%';
+    progressText.textContent = `${q.progress}/${q.goal}`;
+
+    if (q.completed) qCards[i].classList.add('completed');
+  });
+}
+
+
 function computeScore() {
-  const questDiv = document.getElementById('quests');
-  // оставляем визуал квестов отдельными — не трогаем
   let currentTotal = 0;
+
   activeQuests.forEach(q => {
     let bonus = 0;
-    if (q.name === 'Индустриальный штраф') {
-      let count = 0;
-      grid.forEach(row => row.forEach(b => { if (b === 'industrial') count++; }));
-      if (count > 6) bonus = -(count - 6);
-    } else {
-      for (let y = 0; y < gridSize; y++) {
-        for (let x = 0; x < gridSize; x++) {
-          const block = grid[y][x];
-          if (!block) continue;
-          const neighbors = [[x-1,y],[x+1,y],[x,y-1],[x,y+1]];
-          if (q.name === 'Парковый уют' && block === 'residential') { 
-            if (neighbors.some(([nx,ny]) => nx>=0 && ny>=0 && nx<gridSize && ny<gridSize && grid[ny][nx]==='nature')) bonus++; 
-          }
-          if (q.name === 'Комбо культурных' && block === 'culture') { 
-            if (neighbors.some(([nx,ny]) => nx>=0 && ny>=0 && nx<gridSize && ny<gridSize && grid[ny][nx]==='culture')) bonus++; 
-          }
-          if (q.name === 'Жилые на краю' && block==='residential'&&(x===0||y===0||x===gridSize-1||y===gridSize-1)) bonus++;
-          if (q.name === 'Заводы вместе' && block==='industrial') {
-            if (neighbors.some(([nx,ny]) => nx>=0 && ny>=0 && nx<gridSize && ny<gridSize && grid[ny][nx]==='industrial')) bonus++;
-          }
-          if (q.name === 'Индустриальный край' && block==='industrial'&&(x===0||y===0||x===gridSize-1||y===gridSize-1)) bonus--;
+
+    for (let y = 0; y < gridSize; y++) {
+      for (let x = 0; x < gridSize; x++) {
+        const block = grid[y][x];
+        if (!block) continue;
+
+        const neighbors = [[x-1,y],[x+1,y],[x,y-1],[x,y+1]];
+
+        if (q.name === 'Парковый уют' && block === 'residential') { 
+          if (neighbors.some(([nx,ny]) => nx>=0 && ny>=0 && nx<gridSize && ny<gridSize && grid[ny][nx]==='nature')) bonus++; 
         }
+        if (q.name === 'Комбо культурных' && block === 'culture') { 
+          if (neighbors.some(([nx,ny]) => nx>=0 && ny>=0 && nx<gridSize && ny<gridSize && grid[ny][nx]==='culture')) bonus++; 
+        }
+        if (q.name === 'Жилые на краю' && block==='residential'&&(x===0||y===0||x===gridSize-1||y===gridSize-1)) bonus++;
+        if (q.name === 'Заводы вместе' && block==='industrial') {
+          if (neighbors.some(([nx,ny]) => nx>=0 && ny>=0 && nx<gridSize && ny<gridSize && grid[ny][nx]==='industrial')) bonus++;
+        }
+        if (q.name === 'Индустриальный край' && block==='industrial'&&(x===0||y===0||x===gridSize-1||y===gridSize-1)) bonus--;
       }
     }
+
     completedQuestPoints[q.name] = bonus;
+    q.progress = bonus; // синхронизируем прогресс с бонусом
     currentTotal += bonus;
   });
+
   lastScore = currentTotal + completedQuests.reduce((sum,q)=>sum+q.points,0);
+
   document.getElementById('score').textContent = `Очки: ${lastScore}`;
+
   const diff = lastScore - prevScore;
   msgScore.textContent = diff>=0 ? `Начислено: +${diff}` : `Начислено: ${diff}`;
+
+  updateQuestProgressVisuals();
   updateInfo();
 }
+
+
 
 function checkThresholds() {
   let eventMsg = "";
@@ -429,10 +484,7 @@ function checkThresholds() {
     renderHand();
     updateInfo();
   }
-  while (lastScore >= nextQuestThreshold) {
-    if (replaceRandomQuest()) eventMsg += "Заменен квест! ";
-    nextQuestThreshold += 10;
-  }
+
   msgEvent.textContent = eventMsg;
 }
 
@@ -487,6 +539,42 @@ function rotateCard(index) {
     highlightArea(lastHoverX, lastHoverY);
   }
 }
+
+function checkCompletedQuests() {
+  let eventMsg = "";
+
+  for (let i = activeQuests.length - 1; i >= 0; i--) {
+    const q = activeQuests[i];
+
+    // проверяем выполнение
+    if (q.progress >= q.goal) {
+      q.completed = true;
+      completedQuests.push({ name: q.name, points: completedQuestPoints[q.name] });
+      activeQuests.splice(i, 1);
+
+      // любой доступный квест
+      const availableQuests = allQuests.filter(aq => 
+        !completedQuests.some(cq => cq.name === aq.name) &&
+        !activeQuests.some(aq2 => aq2.name === aq.name)
+      );
+
+      if (availableQuests.length > 0) {
+        const idx = Math.floor(Math.random() * availableQuests.length);
+        activeQuests.push(availableQuests[idx]);
+        eventMsg += `Заменён квест "${q.name}" на "${availableQuests[idx].name}"! `;
+        computeScore(); // пересчитываем сразу
+      } else {
+        eventMsg += `Квест "${q.name}" выполнен, новых квестов больше нет. `;
+      }
+    }
+  }
+
+  msgEvent.textContent = eventMsg;
+  renderQuests();
+}
+
+
+
 
 
 </script>
