@@ -149,10 +149,9 @@ body { font-family: sans-serif; text-align: center; }
   <div id="hand"></div>
 </div>
 
-  <div id="message">
-    <div id="msg-score"></div>
-    <div id="msg-event"></div>
-  </div>
+<div id="message">
+  <div id="msg-event-log" style="max-height: 200px; overflow-y: auto;"></div>
+</div>
 </div>
 
 <script>
@@ -257,6 +256,20 @@ function updateDeckCounter() {
   counter.innerHTML = `В колоде:<br><br><span class="count">${deck.length}</span>`;
 }
 
+const eventLog = [];
+const msgEventLogDiv = document.getElementById('msg-event-log');
+
+function addLogMessage(text) {
+  const msgEventLogDiv = document.getElementById('msg-event-log');
+
+  const div = document.createElement('div');
+  div.textContent = text;  // просто текст, без времени и счета
+  msgEventLogDiv.appendChild(div);
+
+  // автопрокрутка вниз
+  msgEventLogDiv.scrollTop = msgEventLogDiv.scrollHeight;
+}
+
 // генерация случайной карты
 function generateRandomCard() {
   const blocks = ["residential", "industrial", "nature", "culture"];
@@ -338,6 +351,8 @@ function renderQuests() {
 renderQuests();
 drawHand();
 computeScore();
+
+msgEventLogDiv.innerHTML = '';  // очистка лога
 
 function drawHand() {
   while (hand.length < 3 && deck.length > 0) {
@@ -441,7 +456,6 @@ function placeCard(x, y) {
   prevScore = lastScore;
   computeScore();
   checkCompletedQuests();
-  checkThresholds();
   checkGameEnd();
 }
 
@@ -508,36 +522,18 @@ function computeScore() {
     }
 
     completedQuestPoints[q.name] = bonus;
-    q.progress = bonus; // синхронизируем прогресс с бонусом
+    q.progress = bonus; 
     currentTotal += bonus;
   });
 
+  const diff = currentTotal + completedQuests.reduce((sum,q)=>sum+q.points,0) - lastScore;
   lastScore = currentTotal + completedQuests.reduce((sum,q)=>sum+q.points,0);
 
-  document.getElementById('score').textContent = `Очки: ${lastScore}`;
-
-  const diff = lastScore - prevScore;
-  msgScore.textContent = diff>=0 ? `Начислено: +${diff}` : `Начислено: ${diff}`;
+  addLogMessage(diff >= 0 ? `Начислено очков: +${diff}.` : `Начислено очков: ${diff}.`);
 
   updateQuestProgressVisuals();
 }
 
-
-
-function checkThresholds() {
-  let eventMsg = "";
-  while (lastScore >= nextCardThreshold) {
-    const newCard = generateRandomCard();
-    deck.push(newCard);
-    if (hand.length < 3) hand.push(deck.pop());
-    eventMsg += "Добавлена новая карта! ";
-    nextCardThreshold += 3;
-    renderHand();
-    updateDeckCounter();
-  }
-
-  msgEvent.textContent = eventMsg;
-}
 
 function replaceRandomQuest() {
   if (activeQuests.length === 0) return false;
@@ -596,20 +592,28 @@ function checkCompletedQuests() {
   for (let i = activeQuests.length - 1; i >= 0; i--) {
     const q = activeQuests[i];
 
-    // проверяем выполнение
     if (q.progress >= q.goal) {
       q.completed = true;
+
+      // начисляем карты как награду
+      for (let j = 0; j < q.reward; j++) {
+        const newCard = generateRandomCard();
+        deck.push(newCard);
+      }
+
       completedQuests.push({ name: q.name, points: completedQuestPoints[q.name] });
       activeQuests.splice(i, 1);
 
-      // проверяем, есть ли ещё квесты в колоде
+      eventMsg += `Квест "${q.name}" выполнен! Получено ${q.reward} карт. `;
+
+      // добавляем новый квест
       let availableQuests = allQuests.filter(aq =>
         !completedQuests.some(cq => cq.name === aq.name) &&
         !activeQuests.some(aq2 => aq2.name === aq.name)
       );
 
-      // если колода пуста, сбрасываем все завершённые квесты
       if (availableQuests.length === 0 && completedQuests.length > 0) {
+        // сброс завершённых квестов
         completedQuests.forEach(cq => {
           const original = allQuests.find(aq => aq.name === cq.name);
           if (original) {
@@ -617,26 +621,27 @@ function checkCompletedQuests() {
             original.completed = false;
           }
         });
-        completedQuests.length = 0; // очищаем массив завершённых
-        availableQuests = allQuests.filter(aq =>
-          !activeQuests.some(aq2 => aq2.name === aq.name)
-        );
+        completedQuests.length = 0;
+        availableQuests = allQuests.filter(aq => !activeQuests.some(aq2 => aq2.name === aq.name));
         eventMsg += "Колода квестов обновлена, завершённые квесты возвращены!\n";
       }
 
-      // добавляем новый квест, если есть
       if (availableQuests.length > 0) {
         const idx = Math.floor(Math.random() * availableQuests.length);
         activeQuests.push(availableQuests[idx]);
-        eventMsg += `Заменён квест "${q.name}" на "${availableQuests[idx].name}"! `;
-        computeScore(); // пересчёт очков сразу
+        eventMsg += `Заменён квест на "${availableQuests[idx].name}"! `;
       }
+
+      computeScore();
     }
   }
 
-  msgEvent.textContent = eventMsg;
+  drawHand();          // обновляем руку, если есть место
+  updateDeckCounter(); // обновляем счетчик колоды
+  eventMsg.split("\n").forEach(line => addLogMessage(line));
   renderQuests();
 }
+
 
 
 </script>
