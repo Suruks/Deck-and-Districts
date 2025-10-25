@@ -202,10 +202,10 @@ const initialHandSize = 12;
 const quests = [
   {
     name: "Город в зелени",
-    reward: 4,
+    reward: 3,
     goal: 10,
     progress: 0,
-    desc: "За каждый дом, соседствующий с парком, +2 очка. За дом без парка рядом — −1 очко."
+    desc: "За каждый дом, соседствующий с парком, +2 очка. За дом без парка рядом — −2 очка."
   },
   {
     name: "Баланс индустрии",
@@ -230,7 +230,7 @@ const quests = [
   },
   {
     name: "Пояс жизни",
-    reward: 4,
+    reward: 3,
     goal: 12,
     progress: 8,
     desc: "Получай +4 очка за каждую цепочку из 4 клеток, где чередуются природные и жилые блоки."
@@ -514,7 +514,7 @@ function computeScore() {
 
         switch (q.name) {
           case "Город в зелени":
-            if (block === 'residential') bonus += near('nature') ? 2 : -1;
+            if (block === 'residential') bonus += near('nature') ? 2 : -2;
             break;
 
           case "Баланс индустрии":
@@ -531,17 +531,27 @@ function computeScore() {
             }
             break;
 
-          case "Сердце культуры":
-            if (block === 'culture') {
-              const typesAround = new Set(neighbors
-                .filter(([nx, ny]) => nx >= 0 && ny >= 0 && nx < gridSize && ny < gridSize)
-                .map(([nx, ny]) => grid[ny][nx])
-              );
-              if (['residential', 'industrial', 'nature', 'culture'].every(t => typesAround.has(t))) {
-                bonus += 3;
-              }
-            }
-            break;
+case "Сердце культуры":
+  if (block === 'culture') {
+    const neighborsCoords = [
+      [x-1, y], [x+1, y], [x, y-1], [x, y+1]
+    ];
+    const neighborTypes = new Set();
+    neighborsCoords.forEach(([nx, ny]) => {
+      if (nx >= 0 && ny >= 0 && nx < gridSize && ny < gridSize) {
+        const b = grid[ny][nx];
+        if (b) neighborTypes.add(b);
+      }
+    });
+    // Проверяем, что соседствуют все 4 типа кварталов
+    if (neighborTypes.has('residential') &&
+        neighborTypes.has('industrial') &&
+        neighborTypes.has('nature') &&
+        neighborTypes.has('culture')) {
+      bonus += 3;
+    }
+  }
+  break;
 
           case "Пояс жизни":
             for (let dir of [[1,0],[0,1]]) {
@@ -554,25 +564,7 @@ function computeScore() {
             break;
 
           case "Душа города":
-            if (block === 'culture') {
-              const visited = new Set();
-              const dfs = (cx, cy) => {
-                const key = `${cx},${cy}`;
-                if (visited.has(key)) return 0;
-                visited.add(key);
-                let count = 1;
-                for (let dx=-1; dx<=1; dx++) {
-                  for (let dy=-1; dy<=1; dy++) {
-                    if (dx||dy) {
-                      const nx=cx+dx, ny=cy+dy;
-                      if (nx>=0 && ny>=0 && nx<gridSize && ny<gridSize && grid[ny][nx]==='culture') count += dfs(nx,ny);
-                    }
-                  }
-                }
-                return count;
-              };
-              if (dfs(x,y) >= 5) bonus += 5;
-            }
+
             break;
         }
       }
