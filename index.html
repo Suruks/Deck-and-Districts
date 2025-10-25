@@ -587,7 +587,6 @@ function rotateCard(index) {
 }
 
 function checkCompletedQuests() {
-  let eventMsg = "";
 
   for (let i = activeQuests.length - 1; i >= 0; i--) {
     const q = activeQuests[i];
@@ -604,7 +603,7 @@ function checkCompletedQuests() {
       completedQuests.push({ name: q.name, points: completedQuestPoints[q.name] });
       activeQuests.splice(i, 1);
 
-      eventMsg += `Квест "${q.name}" выполнен! Получено ${q.reward} карт. `;
+      addLogMessage(`Квест "${q.name}" выполнен! Получено карт: ${q.reward}.`);
 
       // добавляем новый квест
       let availableQuests = allQuests.filter(aq =>
@@ -623,13 +622,13 @@ function checkCompletedQuests() {
         });
         completedQuests.length = 0;
         availableQuests = allQuests.filter(aq => !activeQuests.some(aq2 => aq2.name === aq.name));
-        eventMsg += "Колода квестов обновлена, завершённые квесты возвращены!\n";
+        addLogMessage("Колода квестов обновлена, завершённые квесты возвращены!");
       }
 
       if (availableQuests.length > 0) {
         const idx = Math.floor(Math.random() * availableQuests.length);
         activeQuests.push(availableQuests[idx]);
-        eventMsg += `Заменён квест на "${availableQuests[idx].name}"! `;
+        addLogMessage(`Заменён квест на "${availableQuests[idx].name}"!`);
       }
 
       computeScore();
@@ -638,7 +637,6 @@ function checkCompletedQuests() {
 
   drawHand();          // обновляем руку, если есть место
   updateDeckCounter(); // обновляем счетчик колоды
-  eventMsg.split("\n").forEach(line => addLogMessage(line));
   renderQuests();
 }
 
