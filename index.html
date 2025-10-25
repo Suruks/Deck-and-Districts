@@ -188,6 +188,7 @@ let hand = [];
 let activeQuests = [];
 let completedQuests = [];
 let completedQuestPoints = {};
+let savedPoints = 0;
 let lastScore = 0;
 let prevScore = 0;
 let nextCardThreshold = 3;
@@ -195,15 +196,7 @@ let nextQuestThreshold = 10;
 const msgScore = document.getElementById('msg-score');
 const msgEvent = document.getElementById('msg-event');
 
-const initialHandSize = 16;
-const allQuests = [
-  { name: "Парковый уют", description: "Каждый жилой блок рядом с парком дает +1 очко", type: "positive", goal: 6, progress: 0, reward: 2, completed: false },
-  { name: "Комбо культурных", description: "Каждый культурный блок рядом с другим культурным блоком дает +1 очко", type: "positive", goal: 6, progress: 0, reward: 2, completed: false },
-  { name: "Жилые на краю", description: "Каждый жилой блок на краю поля +1 очко", type: "positive", goal: 6, progress: 0, reward: 1, completed: false },
-  { name: "Заводы вместе", description: "Каждый промышленный блок рядом с другим промышленным +1 очко", type: "positive", goal: 6, progress: 0, reward: 1, completed: false },
-  { name: "Индустриальный штраф", description: "Если промышленных блоков больше 6, каждый лишний -1 очко", type: "negative", goal: 8, progress: 0, reward: 0, completed: false },
-  { name: "Индустриальный край", description: "Каждый промышленный блок на краю -1 очко", type: "negative", goal: 6, progress: 0, reward: 0, completed: false }
-];
+const initialHandSize = 12;
 
 // визуальные квесты (отдельно, для карточек)
 const quests = [
@@ -251,6 +244,8 @@ const quests = [
   }
 ];
 
+const allQuests = quests;
+
 function updateDeckCounter() {
   const counter = document.getElementById('deck-counter');
   counter.innerHTML = `В колоде:<br><br><span class="count">${deck.length}</span>`;
@@ -280,18 +275,18 @@ function generateRandomCard() {
   return { name: "Новая карта", blocks };
 }
 
-for (let i = 0; i < 8; i++) deck.push(generateRandomCard());
+for (let i = 0; i < initialHandSize; i++) deck.push(generateRandomCard());
 
 function initActiveQuests() {
-  const positives = allQuests.filter(q => q.type === "positive");
-  const negatives = allQuests.filter(q => q.type === "negative");
+  const pool = [...allQuests];
   activeQuests = [];
-  for (let i = 0; i < 2; i++) {
-    const idx = Math.floor(Math.random() * positives.length);
-    activeQuests.push(positives.splice(idx, 1)[0]);
+
+  // выберем 3 случайных квеста
+  for (let i = 0; i < 3 && pool.length > 0; i++) {
+    const idx = Math.floor(Math.random() * pool.length);
+    activeQuests.push({ ...pool[idx], progress: 0, completed: false });
+    pool.splice(idx, 1);
   }
-  const idx = Math.floor(Math.random() * negatives.length);
-  activeQuests.push(negatives[idx]);
 }
 initActiveQuests();
 
@@ -493,11 +488,12 @@ function updateQuestProgressVisuals() {
   });
 }
 
-
 function computeScore() {
   let currentTotal = 0;
 
   activeQuests.forEach(q => {
+    if (q.completed) return; // уже зафиксировано в savedPoints
+
     let bonus = 0;
 
     for (let y = 0; y < gridSize; y++) {
@@ -505,58 +501,125 @@ function computeScore() {
         const block = grid[y][x];
         if (!block) continue;
 
-        const neighbors = [[x-1,y],[x+1,y],[x,y-1],[x,y+1]];
+        const neighbors = [
+          [x - 1, y],
+          [x + 1, y],
+          [x, y - 1],
+          [x, y + 1]
+        ];
 
-        if (q.name === 'Парковый уют' && block === 'residential') { 
-          if (neighbors.some(([nx,ny]) => nx>=0 && ny>=0 && nx<gridSize && ny<gridSize && grid[ny][nx]==='nature')) bonus++; 
+        const near = type => neighbors.some(([nx, ny]) =>
+          nx >= 0 && ny >= 0 && nx < gridSize && ny < gridSize && grid[ny][nx] === type
+        );
+
+        switch (q.name) {
+          case "Город в зелени":
+            if (block === 'residential') bonus += near('nature') ? 2 : -1;
+            break;
+
+          case "Баланс индустрии":
+            if (block === 'industrial') {
+              const hasHouse = near('residential');
+              const hasPark = near('nature');
+              bonus += hasHouse && hasPark ? 2 : hasHouse && !hasPark ? -2 : 0;
+            }
+            break;
+
+          case "Комфортные окраины":
+            if (block === 'residential' && (x === 0 || y === 0 || x === gridSize - 1 || y === gridSize - 1)) {
+              if (!near('industrial')) bonus += 2;
+            }
+            break;
+
+          case "Сердце культуры":
+            if (block === 'culture') {
+              const typesAround = new Set(neighbors
+                .filter(([nx, ny]) => nx >= 0 && ny >= 0 && nx < gridSize && ny < gridSize)
+                .map(([nx, ny]) => grid[ny][nx])
+              );
+              if (['residential', 'industrial', 'nature', 'culture'].every(t => typesAround.has(t))) {
+                bonus += 3;
+              }
+            }
+            break;
+
+          case "Пояс жизни":
+            for (let dir of [[1,0],[0,1]]) {
+              if (x + 3*dir[0] < gridSize && y + 3*dir[1] < gridSize) {
+                let seq = [];
+                for (let k = 0; k < 4; k++) seq.push(grid[y+k*dir[1]][x+k*dir[0]]);
+                if (seq.join(',').match(/^(nature,residential|residential,nature)(,nature,residential|,residential,nature){1,}$/)) bonus += 4;
+              }
+            }
+            break;
+
+          case "Душа города":
+            if (block === 'culture') {
+              const visited = new Set();
+              const dfs = (cx, cy) => {
+                const key = `${cx},${cy}`;
+                if (visited.has(key)) return 0;
+                visited.add(key);
+                let count = 1;
+                for (let dx=-1; dx<=1; dx++) {
+                  for (let dy=-1; dy<=1; dy++) {
+                    if (dx||dy) {
+                      const nx=cx+dx, ny=cy+dy;
+                      if (nx>=0 && ny>=0 && nx<gridSize && ny<gridSize && grid[ny][nx]==='culture') count += dfs(nx,ny);
+                    }
+                  }
+                }
+                return count;
+              };
+              if (dfs(x,y) >= 5) bonus += 5;
+            }
+            break;
         }
-        if (q.name === 'Комбо культурных' && block === 'culture') { 
-          if (neighbors.some(([nx,ny]) => nx>=0 && ny>=0 && nx<gridSize && ny<gridSize && grid[ny][nx]==='culture')) bonus++; 
-        }
-        if (q.name === 'Жилые на краю' && block==='residential'&&(x===0||y===0||x===gridSize-1||y===gridSize-1)) bonus++;
-        if (q.name === 'Заводы вместе' && block==='industrial') {
-          if (neighbors.some(([nx,ny]) => nx>=0 && ny>=0 && nx<gridSize && ny<gridSize && grid[ny][nx]==='industrial')) bonus++;
-        }
-        if (q.name === 'Индустриальный край' && block==='industrial'&&(x===0||y===0||x===gridSize-1||y===gridSize-1)) bonus--;
       }
     }
 
-    completedQuestPoints[q.name] = bonus;
-    q.progress = bonus; 
+    q.progress = bonus;
     currentTotal += bonus;
   });
 
-  const diff = currentTotal + completedQuests.reduce((sum,q)=>sum+q.points,0) - lastScore;
-  lastScore = currentTotal + completedQuests.reduce((sum,q)=>sum+q.points,0);
+  const total = savedPoints + currentTotal;
+  const diff = total - lastScore;
+  lastScore = total;
 
-  addLogMessage(diff >= 0 ? `Начислено очков: +${diff}.` : `Начислено очков: ${diff}.`);
-
+  addLogMessage(`Начислено очков: ${diff>=0 ? '+'+diff : diff}.`);
+  document.getElementById('score').textContent = `Очки: ${total}`;
   updateQuestProgressVisuals();
 }
 
-
 function replaceRandomQuest() {
   if (activeQuests.length === 0) return false;
+
+  // убираем случайный квест из активных
   const oldQuestIndex = Math.floor(Math.random() * activeQuests.length);
   const oldQuest = activeQuests.splice(oldQuestIndex, 1)[0];
   completedQuests.push({ name: oldQuest.name, points: completedQuestPoints[oldQuest.name] });
 
-  const positives = allQuests.filter(q => q.type==='positive' && !completedQuests.some(cq => cq.name===q.name) && !activeQuests.some(aq => aq.name===q.name));
-  const negatives = allQuests.filter(q => q.type==='negative' && !completedQuests.some(cq => cq.name===q.name) && !activeQuests.some(aq => aq.name===q.name));
+  // берём новый квест случайно из оставшихся в allQuests
+  const available = allQuests.filter(q =>
+    !completedQuests.some(cq => cq.name === q.name) &&
+    !activeQuests.some(aq => aq.name === q.name)
+  );
 
-  let newQuest = null;
-  if (oldQuest.type === 'positive' && positives.length > 0) {
-    const idx = Math.floor(Math.random() * positives.length);
-    newQuest = positives[idx];
-  } else if (oldQuest.type === 'negative' && negatives.length > 0) {
-    const idx = Math.floor(Math.random() * negatives.length);
-    newQuest = negatives[idx];
-  }
+if (available.length > 0) {
+  const newQuest = available[Math.floor(Math.random() * available.length)];
 
-  if (newQuest) activeQuests.push(newQuest);
-  computeScore();
-  return !!newQuest;
+  //Проверяем, не выполнялся ли этот квест раньше
+  const old = activeQuests.find(q => q.name === newQuest.name && q.completed);
+  if (old) savedPoints += old.progress; // фиксируем очки, чтобы не потерять
+
+  //Добавляем новый экземпляр квеста
+  activeQuests.push({ ...newQuest, progress: 0, completed: false });
 }
+
+  computeScore();
+  renderQuests();
+}
+
 
 function checkGameEnd() {
   if (deck.length === 0 && hand.length === 0) alert("Игра окончена: карты закончились!");
@@ -587,56 +650,38 @@ function rotateCard(index) {
 }
 
 function checkCompletedQuests() {
-
   for (let i = activeQuests.length - 1; i >= 0; i--) {
     const q = activeQuests[i];
 
     if (q.progress >= q.goal) {
       q.completed = true;
+      savedPoints += q.progress; // фиксируем очки
 
-      // начисляем карты как награду
-      for (let j = 0; j < q.reward; j++) {
-        const newCard = generateRandomCard();
-        deck.push(newCard);
-      }
+      // выдаём карты как награду
+      for (let j = 0; j < q.reward; j++) deck.push(generateRandomCard());
 
-      completedQuests.push({ name: q.name, points: completedQuestPoints[q.name] });
+      completedQuests.push({ name: q.name, points: q.progress });
       activeQuests.splice(i, 1);
 
       addLogMessage(`Квест "${q.name}" выполнен! Получено карт: ${q.reward}.`);
 
       // добавляем новый квест
-      let availableQuests = allQuests.filter(aq =>
-        !completedQuests.some(cq => cq.name === aq.name) &&
-        !activeQuests.some(aq2 => aq2.name === aq.name)
-      );
-
-      if (availableQuests.length === 0 && completedQuests.length > 0) {
-        // сброс завершённых квестов
-        completedQuests.forEach(cq => {
-          const original = allQuests.find(aq => aq.name === cq.name);
-          if (original) {
-            original.progress = 0;
-            original.completed = false;
-          }
-        });
-        completedQuests.length = 0;
-        availableQuests = allQuests.filter(aq => !activeQuests.some(aq2 => aq2.name === aq.name));
-        addLogMessage("Колода квестов обновлена, завершённые квесты возвращены!");
-      }
+      const availableQuests = allQuests.filter(aq =>
+    !completedQuests.some(cq => cq.name === aq.name) &&
+    !activeQuests.some(aq2 => aq2.name === aq.name) // сравниваем имена разных объектов
+);
 
       if (availableQuests.length > 0) {
         const idx = Math.floor(Math.random() * availableQuests.length);
-        activeQuests.push(availableQuests[idx]);
+        activeQuests.push({ ...availableQuests[idx], progress: 0, completed: false });
         addLogMessage(`Заменён квест на "${availableQuests[idx].name}"!`);
       }
-
-      computeScore();
     }
   }
 
-  drawHand();          // обновляем руку, если есть место
-  updateDeckCounter(); // обновляем счетчик колоды
+  //computeScore();       // safe, savedPoints уже зафиксированы
+  drawHand();           // обновляем руку
+  updateDeckCounter();  // обновляем счетчик колоды
   renderQuests();
 }
 
