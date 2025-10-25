@@ -225,22 +225,22 @@ const quests = [
     name: "Сердце культуры",
     reward: 6,
     goal: 15,
-    progress: 2,
+    progress: 0,
     desc: "Получай +3 очка за каждый культурный блок, соседствующий со всеми 4-мя видами кварталов."
   },
   {
     name: "Пояс жизни",
     reward: 3,
     goal: 12,
-    progress: 8,
+    progress: 0,
     desc: "Получай +4 очка за каждую цепочку из 4 клеток, где чередуются природные и жилые блоки."
   },
   {
     name: "Душа города",
     reward: 6,
-    goal: 15,
-    progress: 5,
-    desc: "Получай +5 очков за каждую цепочку из 5 культурных блоков, соединённых по соседству или диагонали."
+    goal: 8,
+    progress: 0,
+    desc: "Построй цепочку из 8 культурных блоков, соединённых по соседству."
   }
 ];
 
@@ -496,82 +496,112 @@ function computeScore() {
 
     let bonus = 0;
 
-    for (let y = 0; y < gridSize; y++) {
-      for (let x = 0; x < gridSize; x++) {
-        const block = grid[y][x];
-        if (!block) continue;
+    switch(q.name) {
+      case "Город в зелени":
+      case "Баланс индустрии":
+      case "Комфортные окраины":
+      case "Пояс жизни":
+      case "Сердце культуры":
+        // проход по сетке для этих квестов
+        for (let y = 0; y < gridSize; y++) {
+          for (let x = 0; x < gridSize; x++) {
+            const block = grid[y][x];
+            if (!block) continue;
 
-        const neighbors = [
-          [x - 1, y],
-          [x + 1, y],
-          [x, y - 1],
-          [x, y + 1]
-        ];
+            const neighbors = [
+              [x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]
+            ];
+            const near = type => neighbors.some(([nx, ny]) =>
+              nx >= 0 && ny >= 0 && nx < gridSize && ny < gridSize && grid[ny][nx] === type
+            );
 
-        const near = type => neighbors.some(([nx, ny]) =>
-          nx >= 0 && ny >= 0 && nx < gridSize && ny < gridSize && grid[ny][nx] === type
-        );
+            switch(q.name) {
+              case "Город в зелени":
+                if (block === 'residential') bonus += near('nature') ? 2 : -2;
+                break;
 
-        switch (q.name) {
-          case "Город в зелени":
-            if (block === 'residential') bonus += near('nature') ? 2 : -2;
-            break;
+              case "Баланс индустрии":
+                if (block === 'industrial') {
+                  const hasHouse = near('residential');
+                  const hasPark = near('nature');
+                  bonus += hasHouse && hasPark ? 2 : hasHouse && !hasPark ? -2 : 0;
+                }
+                break;
 
-          case "Баланс индустрии":
-            if (block === 'industrial') {
-              const hasHouse = near('residential');
-              const hasPark = near('nature');
-              bonus += hasHouse && hasPark ? 2 : hasHouse && !hasPark ? -2 : 0;
+              case "Комфортные окраины":
+                if (block === 'residential' && (x===0 || y===0 || x===gridSize-1 || y===gridSize-1)) {
+                  if (!near('industrial')) bonus += 2;
+                }
+                break;
+
+              case "Сердце культуры":
+                if (block === 'culture') {
+                  const dirs = [[-1,0],[1,0],[0,-1],[0,1]];
+                  const neighborTypes = new Set();
+                  dirs.forEach(([dx,dy])=>{
+                    const nx=x+dx, ny=y+dy;
+                    if(nx>=0 && ny>=0 && nx<gridSize && ny<gridSize && grid[ny][nx]) {
+                      neighborTypes.add(grid[ny][nx]);
+                    }
+                  });
+                  if (neighborTypes.has('residential') &&
+                      neighborTypes.has('industrial') &&
+                      neighborTypes.has('nature') &&
+                      neighborTypes.has('culture')) bonus += 3;
+                }
+                break;
+
+              case "Пояс жизни":
+                for (let dir of [[1,0],[0,1]]) {
+                  if (x+3*dir[0]<gridSize && y+3*dir[1]<gridSize) {
+                    let seq = [];
+                    for (let k=0;k<4;k++) seq.push(grid[y+k*dir[1]][x+k*dir[0]]);
+                    if (seq.join(',').match(/^(nature,residential|residential,nature)(,nature,residential|,residential,nature){1,}$/)) bonus += 4;
+                  }
+                }
+                break;
             }
-            break;
+          }
+        }
+        q.progress = bonus;
+        currentTotal += bonus;
+        break;
 
-          case "Комфортные окраины":
-            if (block === 'residential' && (x === 0 || y === 0 || x === gridSize - 1 || y === gridSize - 1)) {
-              if (!near('industrial')) bonus += 2;
-            }
-            break;
+case "Душа города":
+  let maxChainLength = 0;
 
-case "Сердце культуры":
-  if (block === 'culture') {
-    const neighborsCoords = [
-      [x-1, y], [x+1, y], [x, y-1], [x, y+1]
-    ];
-    const neighborTypes = new Set();
-    neighborsCoords.forEach(([nx, ny]) => {
-      if (nx >= 0 && ny >= 0 && nx < gridSize && ny < gridSize) {
-        const b = grid[ny][nx];
-        if (b) neighborTypes.add(b);
+  const directions = [
+    [0,-1], [1,0], [0,1], [-1,0] // вверх, вправо, вниз, влево
+  ];
+
+  function dfs(x, y, visitedSet) {
+    const key = `${x},${y}`;
+    if (x < 0 || y < 0 || x >= gridSize || y >= gridSize) return 0;
+    if (grid[y][x] !== 'culture') return 0;
+    if (visitedSet.has(key)) return 0;
+
+    visitedSet.add(key);
+    let maxLen = 1;
+    for (const [dx, dy] of directions) {
+      const len = 1 + dfs(x + dx, y + dy, new Set(visitedSet));
+      if (len > maxLen) maxLen = len;
+    }
+    return maxLen;
+  }
+
+  for (let y = 0; y < gridSize; y++) {
+    for (let x = 0; x < gridSize; x++) {
+      if (grid[y][x] === 'culture') {
+        const chainLen = dfs(x, y, new Set());
+        if (chainLen > maxChainLength) maxChainLength = chainLen;
       }
-    });
-    // Проверяем, что соседствуют все 4 типа кварталов
-    if (neighborTypes.has('residential') &&
-        neighborTypes.has('industrial') &&
-        neighborTypes.has('nature') &&
-        neighborTypes.has('culture')) {
-      bonus += 3;
     }
   }
+
+  q.progress = Math.min(maxChainLength, 8); // длина самой длинной цепочки, максимум 8
   break;
 
-          case "Пояс жизни":
-            for (let dir of [[1,0],[0,1]]) {
-              if (x + 3*dir[0] < gridSize && y + 3*dir[1] < gridSize) {
-                let seq = [];
-                for (let k = 0; k < 4; k++) seq.push(grid[y+k*dir[1]][x+k*dir[0]]);
-                if (seq.join(',').match(/^(nature,residential|residential,nature)(,nature,residential|,residential,nature){1,}$/)) bonus += 4;
-              }
-            }
-            break;
-
-          case "Душа города":
-
-            break;
-        }
-      }
     }
-
-    q.progress = bonus;
-    currentTotal += bonus;
   });
 
   const total = savedPoints + currentTotal;
@@ -582,6 +612,7 @@ case "Сердце культуры":
   document.getElementById('score').textContent = `Очки: ${total}`;
   updateQuestProgressVisuals();
 }
+
 
 function replaceRandomQuest() {
   if (activeQuests.length === 0) return false;
